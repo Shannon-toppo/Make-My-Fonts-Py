@@ -17,10 +17,10 @@
   "author": "GitHub",
   "license": "CC0-1.0",
   "devDependencies": {
-    "electron": "^6.0.7"
+    "electron": "^42.1.0"
   },
   "dependencies": {
-    "bootstrap": "^4.3.1",
-    "python-shell": "^1.0.8"
+    "bootstrap": "^4.6.2",
+    "python-shell": "^5.0.0"
   }
 }
