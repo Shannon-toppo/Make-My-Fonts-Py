@@ -21,6 +21,14 @@ var ave_y_a_b;
 var view_x_y = [];
 var ave_x_y = [];
 
+//現在書いている一文字分の生の点群データ(画ごと)
+//raw_strokes[画数] = {x: [...], y: [...]}
+var raw_strokes = [];
+
+//同じ文字について複数回書いた生の点群データの配列
+//all_raw_strokes[書いた文字のNo] = raw_strokes
+var all_raw_strokes = [];
+
 var kakusuu = 0;
 var point_nums = [];
 
@@ -50,6 +58,8 @@ var target_char_str = '';
         y_a_b[1].length = 0;
         //ave_x_y.length = 0;
         view_x_y.length = 0;
+        //書いている途中の文字の生点群もクリア
+        raw_strokes.length = 0;
         kakusuu = 0;
         pre_x = -1;
         pre_y = -1;
@@ -147,7 +157,7 @@ var target_char_str = '';
         }
     }
 
-    function plot(_x_a_b, _y_a_b, _ctx, _canvas){
+    function plot(_x_a_b, _y_a_b, _ctx, _canvas, onComplete){
         ave_x_y.length = 0;
         var pyshell = new PythonShell('plot.py', { mode: "json"});
         var x_y_a_b = {};
@@ -162,6 +172,8 @@ var target_char_str = '';
             ave_x_y.push(ave_x_json);
             ave_x_y.push(ave_y_json);
             draw_view_canvas(_ctx, ave_x_y, _canvas);
+            //ave_x_y が確定したタイミングを呼び出し側に通知
+            if (typeof onComplete === 'function') onComplete();
         });
         pyshell.end();
     }
@@ -188,6 +200,18 @@ var target_char_str = '';
         var pyshell = new PythonShell('save_data.py', { mode: "json"});
         var send_json = {};
         send_json[target_char_str] = ave_x_y;
+        pyshell.send(send_json);
+        pyshell.on('message', function (data) {
+
+        });
+        pyshell.end();
+    }
+
+    function save_raw_data(){
+        //文字ごとに、書いた回数分の生点群データを raw_x_y.json に追記保存する
+        var pyshell = new PythonShell('save_raw_data.py', { mode: "json"});
+        var send_json = {};
+        send_json[target_char_str] = all_raw_strokes;
         pyshell.send(send_json);
         pyshell.on('message', function (data) {
 
@@ -281,10 +305,16 @@ var target_char_str = '';
             init_canvas(ave_canvas, ave_ctx);
             all_x_y_a_b[0][draw_num] = JSON.parse(JSON.stringify(x_a_b))
             all_x_y_a_b[1][draw_num] = JSON.parse(JSON.stringify(y_a_b))
+            //生の点群データも同期して蓄積
+            all_raw_strokes[draw_num] = JSON.parse(JSON.stringify(raw_strokes));
             view_plot(x_a_b, y_a_b, ctxes[draw_num], view_canvases[draw_num]);
             draw_num += 1;
             averaging_all_x_y_a_b();
-            plot(ave_x_a_b, ave_y_a_b, ave_ctx, ave_canvas);
+            //プレビュー枠数=サンプル上限に達したら、平均計算が確定した時点で自動的に保存して次の文字へ
+            var reachedSampleLimit = (draw_num >= view_canvases.length);
+            plot(ave_x_a_b, ave_y_a_b, ave_ctx, ave_canvas, reachedSampleLimit ? function(){
+                save_button.click();
+            } : null);
             init();
             init_canvas(canvas, ctx);
         });
@@ -305,6 +335,8 @@ var target_char_str = '';
                 init_canvas(view_canvases[i], ctxes[i]);
             }
             draw_num = 0;
+            //蓄積した生の点群データもまとめてクリア
+            all_raw_strokes.length = 0;
             ok.disabled =  "disabled";
             init_canvas(canvas, ctx);
             init_canvas(ave_canvas, ave_ctx);
@@ -316,6 +348,8 @@ var target_char_str = '';
             left_total_stroke_num = left_total_stroke_num - target_stroke_num;
             left_total_stroke.textContent = left_total_stroke_num;
             save_data();
+            //平均化前の生点群データもファイルに保存
+            save_raw_data();
             saved_char_num += 1;
             target_char_str = kanji_list['results'][saved_char_num]['character'];
             target_stroke_num = kanji_list['results'][saved_char_num]['stroke'];
@@ -331,6 +365,11 @@ var target_char_str = '';
             cancel.disabled = "disabled";
             kakusuu += 1;
             drawing = false;
+            //平均化前の生点群データを画ごとに保存(配列はこの後クリアされるためコピーを取る)
+            raw_strokes.push({
+                x: x_list.slice(),
+                y: y_list.slice()
+            });
             var pyshell = new PythonShell('spline.py', { mode: "json"});
             //pyshell.send({ command: "do_stuff", args: [1, 2, 3] });
             var x_y_json = {};
@@ -352,7 +391,9 @@ var target_char_str = '';
                 promise.then(() => {
                     counter += 1;
                     y_pos.textContent = counter;
-                    if(counter == target_stroke_num){
+                    //サンプル上限に達した状態では追加ボタンを有効化しない
+                    //(上限時は前回の追加で自動保存が走っているため、追加させる必要が無い)
+                    if(counter == target_stroke_num && draw_num < view_canvases.length){
                         ok.disabled = "";
                     }else{
                         ok.disabled = "disabled";
